@@ -301,3 +301,64 @@ extension web3.web3contract {
         }
     }
 }
+
+extension web3.web3contract {
+    
+    /**
+     *Fetches past events Smart-contract developer can make some of event values "indexed" for such fast queries.*
+     
+     - parameters:
+     - filter: EventFilter object setting the block limits for query
+     - topics: [Data] querying specific topics
+     - joinWithReceipts: Bool indicating whether TransactionReceipt should be fetched separately for every matched transaction
+     
+     - returns:
+     - Result object
+     
+     - important: This call is synchronous
+     
+     */
+    public func getPastEvents(filter: EventFilter, topics: [[String?]?]?, joinWithReceipts: Bool = false) throws -> [EventParserResultProtocol] {
+        var eventFilterParameters = filter.rpcPreEncode()
+        eventFilterParameters.topics = topics
+        let result = try self.getPastEventsPromise(parameters: eventFilterParameters, joinWithReceipts: joinWithReceipts).wait()
+        return result
+    }
+}
+
+extension web3.web3contract {
+    public func getPastEventsPromise(parameters: EventFilterParameters, joinWithReceipts: Bool = false) -> Promise<[EventParserResultProtocol]> {
+        let queue = self.web3.requestDispatcher.queue
+        let request = JSONRPCRequestFabric.prepareRequest(.getLogs, parameters: [parameters])
+        let fetchLogsPromise = self.web3.dispatch(request).map(on: queue) {response throws -> [EventParserResult] in
+            guard let value: [EventLog] = response.getValue() else {
+                if response.error != nil {
+                    throw Web3Error.nodeError(desc: response.error!.message)
+                }
+                throw Web3Error.nodeError(desc: "Empty or malformed response")
+            }
+            let allLogs = value
+            let decodedLogs = allLogs.compactMap({ (log) -> EventParserResult? in
+                let (n, d) = self.contract.parseEvent(log)
+                guard let evName = n, let evData = d else {return nil}
+                var res = EventParserResult(eventName: evName, transactionReceipt: nil, contractAddress: log.address, decodedResult: evData)
+                res.eventLog = log
+                return res
+            })
+            return decodedLogs
+        }
+        if (!joinWithReceipts) {
+            return fetchLogsPromise.mapValues(on: queue) {res -> EventParserResultProtocol in
+                return res as EventParserResultProtocol
+            }
+        }
+        return fetchLogsPromise.thenMap(on: queue) {singleEvent in
+            return self.web3.eth.getTransactionReceiptPromise(singleEvent.eventLog!.transactionHash).map(on: queue) { receipt in
+                var joinedEvent = singleEvent
+                joinedEvent.transactionReceipt = receipt
+                return joinedEvent as EventParserResultProtocol
+            }
+        }
+    }
+}
+
