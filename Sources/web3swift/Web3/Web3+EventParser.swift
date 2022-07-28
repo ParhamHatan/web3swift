@@ -319,17 +319,17 @@ extension web3.web3contract {
      
      */
     public func getPastEvents(filter: EventFilter, topics: [[String?]?]?, joinWithReceipts: Bool = false) throws -> [EventParserResultProtocol] {
-        var eventFilterParameters = filter.rpcPreEncode()
-        eventFilterParameters.topics = topics
-        let result = try self.getPastEventsPromise(parameters: eventFilterParameters, joinWithReceipts: joinWithReceipts).wait()
+        let result = try self.getPastEventsPromise(filter: filter, topics: topics, joinWithReceipts: joinWithReceipts).wait()
         return result
     }
 }
 
 extension web3.web3contract {
-    public func getPastEventsPromise(parameters: EventFilterParameters, joinWithReceipts: Bool = false) -> Promise<[EventParserResultProtocol]> {
+    public func getPastEventsPromise(filter: EventFilter, topics: [[String?]?]?, joinWithReceipts: Bool = false) -> Promise<[EventParserResultProtocol]> {
         let queue = self.web3.requestDispatcher.queue
-        let request = JSONRPCRequestFabric.prepareRequest(.getLogs, parameters: [parameters])
+        var eventFilterParameters = filter.rpcPreEncode()
+        eventFilterParameters.topics = topics
+        let request = JSONRPCRequestFabric.prepareRequest(.getLogs, parameters: [eventFilterParameters])
         let fetchLogsPromise = self.web3.dispatch(request).map(on: queue) {response throws -> [EventParserResult] in
             guard let value: [EventLog] = response.getValue() else {
                 if response.error != nil {
